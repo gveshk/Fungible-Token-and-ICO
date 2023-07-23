@@ -5,42 +5,55 @@ pragma solidity ^0.8.0;
 import "./FundToken.sol";
 
 contract ICO{
-    
+
+    //The Goal of ICO
     uint256 public constant ICOGoal = 30000000 ether;
 
+    //Seed phase of ICO has certain limits, total Seed phase limit and Individual limit
+    //Only Private investors can take part in Seed round
     uint256 public constant SeedPhaseSaleLimit = 15000000 ether;
     uint256 public constant SeedPhaseIndividualLimit = 1500000 ether;
 
+    //General phase of ICO has certain limits, total General phase limit and Individual limit
+    //Anyone can take part in General phase
     uint256 public constant GeneralPhaseSaleLimit = 15000000 ether;
     uint256 public constant GeneralPhaseIndividualLimit = 500000 ether;
 
     address public immutable Owner;
     address public immutable TokenAddress;
 
+    //This stores how much contributions made to the ICO
     uint256 public currentTotalContribution;
-    bool public isFundraisingAndFDTRedemptionPaused = false;
-    Phase public currentPhase = Phase.Seed;
 
+    //The boolean which denotes if the ICO is Live or Paused 
+    bool public isFundraisingPaused = false;
+
+    //The boolean which denotes if the ICO is Completed
+    bool public isICOCompleted = false;
+
+    //Denotes the phase of ICO
+    Phase public currentPhase = Phase.Seed;
+    
     mapping(address => bool) public isPrivateContributor;
     mapping(address => uint256) public tokenReedemed;
     mapping(address => uint256) public contributions;
     
 
-    event FundraisingAndFDTRedemptionPaused();
-    event FundRaisingAndFDTRedemptionResumed();
+    event FundraisingPaused();
+    event FundRaisingResumed();
     event PhaseChanged(uint8 newPhase);
+    event ICOCompleted(string announcement);
     event PrivateContributorsAdded(address[] contributors);
     event TokenRedeemed(address indexed to, uint256 amount);
     event ContributionsMade(uint8 indexed currentPhase, address indexed contributor, uint256 value);
 
-     modifier onlyOwner() {
+    modifier onlyOwner() {
         require(msg.sender == Owner, "only owner allowed");
         _;
     }
 
-    modifier isFundRaisingAndFDTRedemptionActive() {
-        require(
-            !isFundraisingAndFDTRedemptionPaused, "fund raising and FDT token redemption is paused");
+    modifier isFundRaisingActive() {
+        require(!isFundraisingPaused, "fund raising is paused");
         _;
     }
 
@@ -55,31 +68,25 @@ contract ICO{
         TokenAddress = address(fundCoin);
     }
 
-     function pauseFundraisingAndFDTRedemption()
-        external
-        onlyOwner
-        isFundRaisingAndFDTRedemptionActive
-    {
-        isFundraisingAndFDTRedemptionPaused = true;
-        emit FundraisingAndFDTRedemptionPaused();
+    function pauseFundraising() external onlyOwner isFundRaisingActive {
+        isFundraisingPaused = true;
+
+        emit FundraisingPaused();
     }
 
-    function resumeFundraisingAndFDTRedemption() external onlyOwner {
-        require(
-            isFundraisingAndFDTRedemptionPaused,
-            "fund raising and spc redemption is active"
-        );
-        isFundraisingAndFDTRedemptionPaused = false;
-        emit FundRaisingAndFDTRedemptionResumed();
+    function resumeFundraising() external onlyOwner {
+        require(!isICOCompleted, "ICO has come to an END");
+        require(isFundraisingPaused,"fund raising is active");
+        isFundraisingPaused = false;
+
+        emit FundRaisingResumed();
     }
 
     function updatePhase(uint8 newPhase) external onlyOwner {
         require(currentPhase != Phase.General, "can't advance phase after General");
         require(newPhase <= uint8(Phase.General), "invalid phase");
-        require(
-            uint8(currentPhase) != newPhase,
-            "current phase is same as desired phase"
-        );
+        require(uint8(currentPhase) != newPhase, "current phase is same as desired phase");
+
         if (currentPhase == Phase.Seed) {
             require(
                 newPhase == uint8(Phase.General),
@@ -91,22 +98,26 @@ contract ICO{
         emit PhaseChanged(uint8(currentPhase));
     }
 
-    function addPrivateContributors(address[] calldata contributors)
-        external
-        onlyOwner
-    {
+    function addPrivateContributors(address[] calldata contributors) external onlyOwner {
         for (uint256 i = 0; i < contributors.length; i++) {
             isPrivateContributor[contributors[i]] = true;
         }
+
         emit PrivateContributorsAdded(contributors);
+    }
+
+    function endFundraising() external onlyOwner isFundRaisingActive {
+        isFundraisingPaused = true;
+        isICOCompleted =  true ;
+
+        emit ICOCompleted("ICO has come to an END") ;
     }
 
 
 
 
-    function participateInICO() external payable isFundRaisingAndFDTRedemptionActive {
+    function participateInICO() external payable isFundRaisingActive {
         require(msg.value > 0, "no contributions made");
-
         if (currentPhase == Phase.Seed) {
             require(isPrivateContributor[msg.sender], "not a private investor");
             require(
@@ -141,11 +152,8 @@ contract ICO{
     }
 
 
-    function redeemToken() external isFundRaisingAndFDTRedemptionActive {
-        require(
-            currentPhase == Phase.General,
-            "can redeem only during General phase"
-        );
+    function redeemToken() external {
+        require(isICOCompleted, "ICO is still Live");
         require(contributions[msg.sender] > 0, "no contributions made");
         uint256 amountToTransfer = (contributions[msg.sender] * 5) -
             tokenReedemed[msg.sender];
